@@ -12,7 +12,7 @@ from aiohttp import web
 
 # ===== Basic setup =====
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OWNER_CHAT_ID = 6413238670  # Replace with bot owner's Telegram user ID
+OWNER_CHAT_ID = 6413238670 
 
 # Render предоставляет URL вашего сервиса
 RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://client-survey-bot.onrender.com")
