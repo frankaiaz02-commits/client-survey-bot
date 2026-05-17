@@ -1,18 +1,29 @@
-import os
 import asyncio
+import os
+import logging
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 # ===== Basic setup =====
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OWNER_CHAT_ID = 6413238670  
+OWNER_CHAT_ID = 6413238670  # Replace with bot owner's Telegram user ID
+
+# Render предоставляет URL вашего сервиса
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://client-survey-bot.onrender.com")
+WEBHOOK_PATH = "/webhook"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # ===== Text placeholders =====
@@ -162,14 +173,46 @@ async def handle_question_5(message: Message, state: FSMContext):
     await message.answer(FINAL_RESPONSE)
 
     # Optional: print answers in console
-    print("Survey answers:", survey_answers)
+    logger.info(f"Survey answers: {survey_answers}")
+
+
+# ===== Webhook and Health Check (для Render) =====
+async def on_startup(bot: Bot):
+    webhook_url = f"{RENDER_URL}{WEBHOOK_PATH}"
+    await bot.set_webhook(webhook_url)
+    logger.info(f"Вебхук установлен на {webhook_url}")
+
+async def on_shutdown(bot: Bot):
+    await bot.delete_webhook()
+    logger.info("Вебхук удален")
+
+# Health check для Render
+async def health(request):
+    return web.Response(text="OK")
 
 
 # ===== Run bot =====
 async def main():
-    await dp.start_polling(bot)
-
+    # Настройка вебхуков
+    dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
+    
+    # Создаем aiohttp приложение
+    app = web.Application()
+    app.router.add_get("/", health)
+    
+    # Настройка вебхук обработчика
+    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    
+    # Запускаем веб-сервер
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    await site.start()
+    
+    logger.info("Бот запущен и слушает вебхуки...")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
