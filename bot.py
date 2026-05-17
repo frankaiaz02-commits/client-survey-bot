@@ -1,3 +1,4 @@
+import os
 import asyncio
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -7,8 +8,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 # ===== Basic setup =====
-BOT_TOKEN = ""
-OWNER_CHAT_ID = 6413238670  # Replace with bot owner's Telegram user ID
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+OWNER_CHAT_ID = 6413238670  
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
