@@ -1,6 +1,9 @@
 import asyncio
-import os
 import logging
+import os
+import sys
+
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -8,22 +11,26 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ===== Basic setup =====
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OWNER_CHAT_ID = 6413238670 
-
-# Render предоставляет URL вашего сервиса
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://client-survey-bot.onrender.com")
+OWNER_CHAT_ID = 6413238670
 WEBHOOK_PATH = "/webhook"
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN environment variable is not set")
+    sys.exit(1)
+
+RENDER_URL = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 # ===== Text placeholders =====
@@ -137,82 +144,82 @@ async def handle_q4_active_buttons(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(SurveyStates.Q4, F.data == "disabled")
 async def handle_q4_disabled_button(callback: CallbackQuery):
-    await callback.answer("This option is disabled.", show_alert=False)
+    await callback.answer("Эта опция пока недоступна.", show_alert=False)
 
 
 # ===== Q5 (open text): finalize survey =====
 @dp.message(SurveyStates.Q5, F.text)
 async def handle_question_5(message: Message, state: FSMContext):
     await state.update_data(answer_5=message.text)
-
-    # Get all answers from FSM storage
     survey_answers = await state.get_data()
-    # Example structure:
-    # {
-    #   "answer_1": "...",
-    #   "answer_2": "...",
-    #   "answer_3": "...",
-    #   "answer_4": "...",
-    #   "answer_5": "..."
-    # }
 
-    # Forward collected answers to bot owner
+    username = message.from_user.username
+    username_line = f"Username: @{username}" if username else "Username: (not set)"
+
     owner_report = (
         "New survey response:\n"
         f"User ID: {message.from_user.id}\n"
-        f"Username: @{message.from_user.username}\n"
+        f"{username_line}\n"
         f"Q1: {survey_answers.get('answer_1')}\n"
         f"Q2: {survey_answers.get('answer_2')}\n"
         f"Q3: {survey_answers.get('answer_3')}\n"
         f"Q4: {survey_answers.get('answer_4')}\n"
         f"Q5: {survey_answers.get('answer_5')}"
     )
-    await bot.send_message(chat_id=OWNER_CHAT_ID, text=owner_report)
+
+    try:
+        await bot.send_message(chat_id=OWNER_CHAT_ID, text=owner_report)
+    except Exception:
+        logger.exception("Failed to send survey report to owner chat %s", OWNER_CHAT_ID)
 
     await state.clear()
     await message.answer(FINAL_RESPONSE)
-
-    # Optional: print answers in console
-    logger.info(f"Survey answers: {survey_answers}")
+    logger.info("Survey answers: %s", survey_answers)
 
 
-# ===== Webhook and Health Check (для Render) =====
-async def on_startup(bot: Bot):
+# ===== Webhook and health check (Render) =====
+async def on_startup(bot: Bot) -> None:
+    if not RENDER_URL:
+        raise RuntimeError("RENDER_EXTERNAL_URL must be set on Render")
     webhook_url = f"{RENDER_URL}{WEBHOOK_PATH}"
     await bot.set_webhook(webhook_url)
-    logger.info(f"Вебхук установлен на {webhook_url}")
+    logger.info("Webhook set successfully: %s", webhook_url)
 
-async def on_shutdown(bot: Bot):
+
+async def on_shutdown(bot: Bot) -> None:
     await bot.delete_webhook()
-    logger.info("Вебхук удален")
+    logger.info("Webhook removed")
 
-# Health check для Render
-async def health(request):
+
+async def health(_request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 
-# ===== Run bot =====
-async def main():
-    # Настройка вебхуков
+async def main() -> None:
+    if not RENDER_URL:
+        logger.error("RENDER_EXTERNAL_URL environment variable is not set (required on Render)")
+        sys.exit(1)
+
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
-    
-    # Создаем aiohttp приложение
+
     app = web.Application()
     app.router.add_get("/", health)
-    
-    # Настройка вебхук обработчика
-    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
-    
-    # Запускаем веб-сервер
+    app.router.add_get("/health", health)
+
+    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_handler.register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    port = int(os.environ.get("PORT", "10000"))
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
     await site.start()
-    
-    logger.info("Бот запущен и слушает вебхуки...")
+
+    logger.info("Bot listening on 0.0.0.0:%s (webhook path: %s)", port, WEBHOOK_PATH)
     await asyncio.Event().wait()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
