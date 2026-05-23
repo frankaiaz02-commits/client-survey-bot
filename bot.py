@@ -88,6 +88,17 @@ def q4_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def button_label(callback: CallbackQuery) -> str:
+    """Return the visible text of the pressed inline button."""
+    markup = callback.message.reply_markup if callback.message else None
+    if markup:
+        for row in markup.inline_keyboard:
+            for button in row:
+                if button.callback_data == callback.data:
+                    return button.text
+    return callback.data
+
+
 # ===== Start survey =====
 @dp.message(CommandStart())
 async def start_survey(message: Message, state: FSMContext):
@@ -100,7 +111,7 @@ async def start_survey(message: Message, state: FSMContext):
 @dp.callback_query(SurveyStates.Q1, F.data.in_(["q2_optA", "q2_optB", "skip_to_q5"]))
 async def handle_q1_buttons(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.update_data(answer_1=callback.data)
+    await state.update_data(answer_1=button_label(callback))
 
     if callback.data == "skip_to_q5":
         await state.update_data(
@@ -128,7 +139,7 @@ async def handle_question_2(message: Message, state: FSMContext):
 @dp.callback_query(SurveyStates.Q3, F.data.in_(["to_q4_one", "to_q4_two", "to_q4_three"]))
 async def handle_q3_buttons(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.update_data(answer_3=callback.data)
+    await state.update_data(answer_3=button_label(callback))
     await state.set_state(SurveyStates.Q4)
     await callback.message.answer(QUESTION_4, reply_markup=q4_keyboard())
 
@@ -137,7 +148,7 @@ async def handle_q3_buttons(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(SurveyStates.Q4, F.data.in_(["to_q5_a", "to_q5_b"]))
 async def handle_q4_active_buttons(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.update_data(answer_4=callback.data)
+    await state.update_data(answer_4=button_label(callback))
     await state.set_state(SurveyStates.Q5)
     await callback.message.answer(QUESTION_5)
 
